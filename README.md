@@ -80,7 +80,7 @@ a verdict, a report or a Hermes payload is identical in shape either way.
 No dependencies. Python 3.9+.
 
 ```bash
-git clone <your-repo> rea && cd rea
+git clone https://github.com/roxtong1337/ARGUS.git rea && cd rea
 python -m rea.cli scan /bin/ls          # run straight from the checkout
 pip install -e .                        # or install the `rea` entry point
 ```
