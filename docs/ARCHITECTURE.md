@@ -34,6 +34,93 @@ touches exactly one file.
 └──────────────────┘                                 └──────────────────────┘
 ```
 
+## The second layer: detonation
+
+Everything above is static, and it stops at the file boundary. A script that
+prints `hello` and a script that prints `hello` and then beacons to a C2 host
+have identical bytes. Detonation answers the question the bytes cannot.
+
+```
+   Artifact ───▶┌───────────────────────────────┐
+                │ dynamic/runner (Detonator)    │
+                │  check() → refuse if not ready│
+                └───────────────┬───────────────┘
+                                ▼
+                ┌───────────────────────────────┐
+                │ dynamic/backends              │
+                │  docker  (isolated)           │
+                │  local   (NOT isolated)       │
+                └───────────────┬───────────────┘
+                                │  raw strace output
+                                ▼
+                ┌───────────────────────────────┐
+                │ dynamic/telemetry             │
+                │  strace lines → SyscallEvents │
+                └───────────────┬───────────────┘
+                                ▼
+                ┌───────────────────────────────┐
+                │ dynamic/behaviors             │
+                │  12 checks → 17 finding types │
+                └───────────────┬───────────────┘
+                                │  the SAME Finding objects
+                                ▼
+                    merged into the existing Artifact
+```
+
+The important design choice is at the bottom of that diagram: behavioural
+findings are ordinary `Finding` objects appended to the same artifact. Scoring,
+the four report formats and the Hermes payload need no knowledge that detonation
+exists. `artifact.stats["dynamic"]` carries the telemetry summary for the report
+layer, but nothing downstream branches on it.
+
+Three invariants make this safe to run:
+
+- **Refusal over fallback.** If `check()` fails, the runner returns a skipped
+  result. It never executes the sample on the host. `LocalBackend` refuses unless
+  the caller passed `allow_unsafe=True`.
+- **The sample's strings never reach a decision.** Behaviour checks match
+  syscall structure and arguments, not output text. The agent planner follows the
+  same rule.
+- **Failure is evidence, not noise.** A `connect()` that returns `EPERM` is
+  recorded and reported. Intent is the finding; success is not required.
+
+## The third layer: the ARGUS agent
+
+The CLI is one command per invocation. An investigation is a sequence of them,
+so the agent holds the session state and lets the operator stay in one place.
+
+```
+        operator text
+              │
+              ▼
+    ┌─────────────────────┐        deterministic, no model call
+    │ RulePlanner.plan    │────────── decides from the operator's words
+    └──────────┬──────────┘
+               │  List[PlanStep]
+               ▼
+    ┌─────────────────────┐
+    │ ToolRegistry        │  scan detonate full send integrations
+    │  handler(**args)    │  rules sandbox help
+    └──────────┬──────────┘
+               │  ToolResult(ok, summary, data, artifacts)
+               ▼
+    ┌─────────────────────┐
+    │ AgentSession        │  history, transcript, current artifact
+    └──────────┬──────────┘
+               │  events
+      ┌────────┴────────┐
+      ▼                 ▼
+┌───────────┐   ┌──────────────────┐
+│ tui.py    │   │ web/server.py    │
+│ ANSI REPL │   │ http.server + UI │
+└───────────┘   └──────────────────┘
+```
+
+Both front-ends are thin. They render what the session emits and send text back
+in. `Planner` is a protocol, so an LLM planner can be dropped in, but the default
+is a rule-based parser precisely because a sample is attacker-controlled input —
+nothing from the file may steer the plan.
+
 ## The artifact model
 
 `rea/core/model.py` defines the single object everything operates on.
@@ -71,6 +158,15 @@ corpus stays fast.
 network failure; they return `ok=False` with a reason. That keeps a delivery
 problem from aborting a triage run.
 
+**Backends** — `check() -> (bool, reason)` then
+`run(path, timeout, ...) -> RawRun`. A backend is the only thing allowed to
+execute a sample. `check()` is a promise: if it returns `True`, `run()` will
+work. The runner trusts it and never falls back to a less isolated path.
+
+**Behaviour checks** — `check(telemetry) -> List[Finding]`. Pure functions over
+`Telemetry`, individually wrapped like heuristics. A check that raises costs one
+finding, never the run.
+
 **Reports** — `render(artifact, fmt) -> str`. Pure functions, no side effects.
 
 ## Scoring model
@@ -95,6 +191,11 @@ anomalies.
 The final pass, `h_rule_pressure`, raises a finding when four or more independent
 medium-or-higher signals agree. Corroboration is a stronger signal than any one
 heuristic, and it is what keeps the verdict stable as rules are added.
+
+Behavioural findings from detonation enter the same sum. They are weighted
+deliberately: an observed `connect()` outranks a string that merely looks like a
+URL, because one is evidence and the other is a hint. See
+[`DETONATION.md`](DETONATION.md) for the per-check weights.
 
 Scores sum and cap at 100:
 
@@ -129,10 +230,18 @@ of aborting:
 - the rule engine skips a rule whose regex will not compile rather than failing
   the file,
 - heuristics are individually wrapped, so one bad heuristic costs one finding,
+- behaviour checks are wrapped the same way, so a malformed trace costs one
+  finding rather than the detonation run,
 - integrations return a failed result instead of raising.
 
 A scan of a hostile file always produces a report. It may be a report full of
 warnings, but it is a report.
+
+The one place this philosophy is deliberately inverted is the sandbox. There,
+failing soft would mean running untrusted code without isolation, so the runner
+refuses loudly instead: no container runtime, no detonation, exit code 1 and a
+clear reason. A silent downgrade to host execution would be a security bug, not
+a graceful degradation.
 
 ## Performance
 
@@ -141,3 +250,18 @@ Hashing streams in 1 MiB chunks. String extraction is capped at 20,000 entries
 and 4 KiB per string. The default analysis cap is 256 MiB, overridable with
 `--max-bytes`. For a corpus, prefer `rea batch` so rules load once for the whole
 run instead of once per file.
+
+Detonation is bounded by four independent limits, and the smallest one wins: a
+wall-clock timeout (`--timeout`, default 20s), a memory cap (`--memory`, default
+256 MiB), a process cap (`--pids`, default 128) and Docker's own `--cpus`. The
+timeout is enforced inside the container as well as by the runner, so a sample
+that traps `SIGTERM` still cannot outlive it.
+
+## Where to read next
+
+| Document | Covers |
+| --- | --- |
+| [`RULES.md`](RULES.md) | The rule language, modifiers and pack layout |
+| [`DETONATION.md`](DETONATION.md) | Sandbox threat model, every behaviour check, known limits |
+| [`ARGUS.md`](ARGUS.md) | The agent, its tools, the planner and both front-ends |
+| [`HERMES.md`](HERMES.md) | The Hermes adapter contract and payload modes |

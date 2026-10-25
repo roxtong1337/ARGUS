@@ -363,6 +363,10 @@ def cmd_detonate(args) -> int:
     from .dynamic import Detonator
     from .report.render import render
 
+    if not os.path.isfile(args.file):
+        print(f"error: no such file: {args.file}", file=sys.stderr)
+        return 1
+
     rule_paths = args.rules if args.rules else [DEFAULT_RULE_DIR]
     artifact = Pipeline(rule_paths=rule_paths).scan_path(args.file)
 
@@ -439,14 +443,14 @@ def cmd_agent(args) -> int:
 
         return serve(host=args.host, port=args.port, token=args.token, verbose=args.verbose)
 
-    from .agent.tui import CYAN, Tui
+    from .agent.tui import Tui
 
     session = AgentSession()
     if args.agent_commands:
         tui = Tui(session=session, colour=not args.no_colour)
         tui.banner()
         for command in args.agent_commands:
-            tui._write(f"\n  {tui.colour('▸', CYAN)} {command}")
+            tui._write(f"\n  {tui.prompt()}{command}")
             tui._dispatch(command)
         return 0
 

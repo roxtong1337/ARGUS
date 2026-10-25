@@ -194,7 +194,7 @@ rules/           bundled rule packs (.rea)
 sandbox/         Dockerfile for the detonation image
 tests/           unittest suite, runnable without pytest
 samples/         synthetic malicious and benign samples
-docs/            ARCHITECTURE.md  RULES.md  HERMES.md  DETONATION.md
+docs/            ARCHITECTURE.md  RULES.md  HERMES.md  DETONATION.md  ARGUS.md
 ```
 
 ## Tests

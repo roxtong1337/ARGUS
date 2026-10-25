@@ -84,7 +84,7 @@ class RulePlanner:
             return [PlanStep(tool="scan", arguments={"path": rest[0]},
                              rationale=f"static analysis of {rest[0]}")]
 
-        if verb in ("detonate", "run", "execute", "sandbox", "dynamic"):
+        if verb in ("detonate", "run", "execute", "dynamic"):
             path = rest[0] if rest and not rest[0].startswith("--") else ""
             timeout = _flag_int(rest, "--timeout", 20)
             return [PlanStep(tool="detonate", arguments={"path": path, "timeout": timeout},
