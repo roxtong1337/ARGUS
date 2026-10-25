@@ -102,6 +102,19 @@ Do not change them without updating the README and the CLI tests.
 - **`_RuleParser` needs the `json` import** to re-quote condition string literals.
 - **YARA `wide` semantics differ here.** `wide` means *also* match UTF-16LE, not
   *only*. This is documented in `docs/RULES.md`; do not "fix" it silently.
+- **`sandbox` and `detonate` are different intents.** `sandbox` asks whether
+  detonation is available; `detonate` runs a file. Folding them into one verb
+  made the `sandbox` command execute a sample. Keep the verbs separate in
+  `RulePlanner.plan`, and keep `_sandbox_status` free of side effects.
+- **`BANNER` must stay plain text.** Colour is applied in `Tui.banner()` through
+  the `Colour` helper. Baking ANSI codes into the constant makes `--no-colour`
+  a lie, because `print` cannot strip what is already in the string.
+- **A `Tui` handed an existing session must wire `on_event` itself.** Passing
+  `on_event=` to the constructor only covers the case where the Tui builds the
+  session. The CLI injects one, so the constructor wires it when it is unset.
+- **`cmd_detonate` must check the file before scanning.** The static pipeline
+  raises `FileNotFoundError` for a missing path; every other command returns
+  exit 1 with a message. Match that, or the exit-code contract breaks.
 - **Header names from `http.server` are title-cased** (`X-Rea-Signature`). Tests
   must compare case-insensitively.
 - **`describe_all` is exported from `rea/integrations/__init__.py`.** Adding a

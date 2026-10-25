@@ -44,11 +44,11 @@ VERDICT_COLOUR = {
     "clean": GREEN,
 }
 
-BANNER = f"""\
-{BOLD}{CYAN}  ┌───────────────────────────────────────────────────────────────┐
-  │  {AGENT_NAME} · reverse-engineering analyst agent{RESET}{BOLD}{CYAN}                   │
-  └───────────────────────────────────────────────────────────────┘{RESET}
-  {DIM}static analysis + sandboxed detonation · offline · type{RESET} help {DIM}for commands{RESET}
+BANNER = """\
+  ┌───────────────────────────────────────────────────────────────┐
+  │  {name} · reverse-engineering analyst agent                    │
+  └───────────────────────────────────────────────────────────────┘
+  static analysis + sandboxed detonation · offline · type help for commands
 """
 
 
@@ -169,7 +169,9 @@ class Tui:
                  stream=None):
         self.stream = stream or sys.stdout
         self.colour = Colour(_supports_colour(self.stream) if colour is None else colour)
-        self.session = session or AgentSession(on_event=self._on_event)
+        self.session = session or AgentSession()
+        if self.session.on_event is None:
+            self.session.on_event = self._on_event
 
     # ---- event plumbing ------------------------------------------------
 
@@ -186,13 +188,18 @@ class Tui:
     # ---- the loop ------------------------------------------------------
 
     def banner(self) -> None:
-        self._write(BANNER)
+        lines = BANNER.format(name=AGENT_NAME).rstrip("\n").splitlines()
+        self._write("\n".join(self.colour(line, BOLD, CYAN) for line in lines[:3]))
+        self._write(self.colour(lines[3], DIM))
+
+    def prompt(self) -> str:
+        return f"{self.colour('argus', BOLD, CYAN)}{self.colour('>', DIM)} "
 
     def run(self) -> int:
         self.banner()
         while True:
             try:
-                line = input(f"{self.colour('argus', BOLD, CYAN)}{self.colour('>', DIM)} ")
+                line = input(self.prompt())
             except (EOFError, KeyboardInterrupt):
                 self._write(f"\n{self.colour('session ended', DIM)}")
                 return 0

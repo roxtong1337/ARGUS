@@ -99,6 +99,23 @@ kill $SERVER_PID 2>/dev/null
 wait $SERVER_PID 2>/dev/null
 
 echo
+echo "--- 8. is detonation available? -------------------------------"
+$PY -m rea.cli sandbox || echo "  (no container runtime: detonation is unavailable, which is a valid outcome)"
+
+echo
+echo "--- 9. detonate the sample in the sandbox ---------------------"
+if $PY -m rea.cli sandbox >/dev/null 2>&1; then
+    $PY -m rea.cli detonate samples/malicious_sample.sh --timeout 25 --quiet || true
+else
+    echo "  skipped: no container runtime. Static triage still produced a report,"
+    echo "  and the runner refuses rather than executing the sample on the host."
+fi
+
+echo
+echo "--- 10. the same investigation through the ARGUS agent --------"
+$PY -m rea.cli agent --no-colour --exec "integrations" --exec "rules" --exec "scan samples/benign_sample.sh"
+
+echo
 echo "=============================================================="
 echo " demo complete"
 echo "=============================================================="

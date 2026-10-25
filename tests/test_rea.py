@@ -16,6 +16,10 @@ import sys
 import tempfile
 import threading
 import unittest
+import contextlib
+import io
+import shutil
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,6 +34,8 @@ from rea.report import render
 from tests import factories
 
 RULES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rules")
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SAMPLES_DIR = os.path.join(ROOT_DIR, "samples")
 
 
 # ----------------------------------------------------------------------
@@ -709,6 +715,191 @@ class TestCLI(unittest.TestCase):
                 fh.write(factories.make_script_benign())
             code = self._run(["send", path, "--to", "nope", "--quiet"])
             self.assertEqual(code, 1)
+
+
+# ----------------------------------------------------------------------
+# CLI: the detonate, sandbox and agent subcommands
+# ----------------------------------------------------------------------
+
+
+def _docker_ready() -> bool:
+    from rea.dynamic import Detonator
+
+    ready, _ = Detonator(backend="docker").check()
+    return ready
+
+
+DOCKER_READY = _docker_ready()
+
+
+class TestCliSandbox(unittest.TestCase):
+    def _run(self, argv):
+        from rea import cli
+
+        return cli.main(argv)
+
+    def test_sandbox_reports_readiness_and_exit_code(self):
+        """The exit code must agree with what the command prints."""
+        from rea.dynamic import Detonator
+
+        ready, _ = Detonator().check()
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code = self._run(["sandbox"])
+        text = out.getvalue()
+        self.assertIn("docker", text)
+        self.assertIn("local", text)
+        # The local backend is never isolated, and must always say so.
+        self.assertIn("NOT ISOLATED", text)
+        self.assertEqual(code, 0 if ready else 1)
+
+    def test_sandbox_never_claims_local_is_isolated(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self._run(["sandbox"])
+        local_line = [l for l in out.getvalue().splitlines() if "] local" in l][0]
+        self.assertIn("NOT ISOLATED", local_line)
+
+
+class TestCliDetonate(unittest.TestCase):
+    def _run(self, argv):
+        from rea import cli
+
+        return cli.main(argv)
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="rea-cli-")
+        self.sample = os.path.join(self.tmp, "probe.sh")
+        with open(self.sample, "w", encoding="utf-8") as handle:
+            handle.write("#!/bin/sh\nprintf 'cli-detonation-marker\\n'\n")
+        os.chmod(self.sample, 0o644)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_missing_file_errors_before_touching_the_sandbox(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            code = self._run(["detonate", "/nonexistent/x.bin", "--quiet"])
+        self.assertEqual(code, 1)
+
+    def test_local_backend_is_refused_without_allow_unsafe(self):
+        """No container runtime, no --allow-unsafe: it must refuse, not run."""
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            code = self._run(["detonate", self.sample, "--backend", "local", "--quiet"])
+        self.assertEqual(code, 1)
+        self.assertIn("unavailable", err.getvalue().lower())
+
+    def test_unknown_backend_is_rejected_by_the_parser(self):
+        with self.assertRaises(SystemExit):
+            with contextlib.redirect_stderr(io.StringIO()):
+                self._run(["detonate", self.sample, "--backend", "nope", "--quiet"])
+
+    @unittest.skipUnless(DOCKER_READY, "no container runtime available")
+    def test_detonate_emits_a_json_report_with_dynamic_findings(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code = self._run(
+                ["detonate", self.sample, "--timeout", "25", "--format", "json", "--quiet"]
+            )
+        payload = json.loads(out.getvalue())
+        self.assertIn(code, (0, 2, 3))
+        self.assertIn("stats", payload)
+        dynamic = payload["stats"]["dynamic"]
+        self.assertTrue(dynamic["executed"])
+        self.assertTrue(dynamic["isolated"])
+        self.assertGreater(dynamic["telemetry"]["event_count"], 0)
+
+    @unittest.skipUnless(DOCKER_READY, "no container runtime available")
+    def test_detonate_writes_report_to_a_file(self):
+        dst = os.path.join(self.tmp, "report.md")
+        with contextlib.redirect_stderr(io.StringIO()):
+            self._run(["detonate", self.sample, "--timeout", "25",
+                       "--format", "markdown", "-o", dst, "--quiet"])
+        with open(dst, encoding="utf-8") as handle:
+            self.assertIn("# REA report", handle.read())
+
+    @unittest.skipUnless(DOCKER_READY, "no container runtime available")
+    def test_detonate_non_runnable_format_is_reported_not_crashed(self):
+        """A PE cannot run on Linux; the run must still produce a report."""
+        path = os.path.join(self.tmp, "thing.exe")
+        with open(path, "wb") as handle:
+            handle.write(b"MZ" + b"\x00" * 200)
+        with contextlib.redirect_stdout(io.StringIO()) as out, \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            code = self._run(["detonate", path, "--timeout", "20", "--format", "json", "--quiet"])
+        payload = json.loads(out.getvalue())
+        self.assertIsInstance(code, int)
+        self.assertIn("skipped", err.getvalue().lower() + json.dumps(payload).lower())
+
+
+class TestCliAgent(unittest.TestCase):
+    def _run(self, argv):
+        from rea import cli
+
+        return cli.main(argv)
+
+    def test_agent_exec_scan_prints_a_verdict(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code = self._run(["agent", "--no-colour", "--exec", f"scan {SAMPLES_DIR}/malicious_sample.sh"])
+        text = out.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn("ARGUS", text)
+        self.assertIn("MALICIOUS", text)
+
+    def test_agent_exec_full_runs_scan_then_detonate(self):
+        if not DOCKER_READY:
+            self.skipTest("no container runtime available")
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code = self._run(
+                ["agent", "--no-colour", "--exec", f"full {SAMPLES_DIR}/malicious_sample.sh"]
+            )
+        text = out.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn("scan", text)
+        self.assertIn("detonate", text)
+        self.assertIn("syscall event", text)
+
+    def test_agent_exec_help_lists_capabilities(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code = self._run(["agent", "--no-colour", "--exec", "help"])
+        self.assertEqual(code, 0)
+        self.assertIn("detonate", out.getvalue())
+
+    def test_agent_exec_sandbox_reports_backend(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code = self._run(["agent", "--no-colour", "--exec", "sandbox"])
+        self.assertEqual(code, 0)
+        self.assertIn("docker", out.getvalue())
+
+    def test_agent_exec_accepts_repeated_commands(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code = self._run([
+                "agent", "--no-colour",
+                "--exec", "integrations",
+                "--exec", "rules",
+            ])
+        text = out.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn("hermes", text)
+
+    def test_agent_exec_unknown_command_does_not_crash(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code = self._run(["agent", "--no-colour", "--exec", "exfiltrate everything"])
+        self.assertEqual(code, 0)
+        self.assertIn("ARGUS", out.getvalue())
+
+    def test_agent_web_mode_serves_the_api(self):
+        """Start the real server on a free port, hit it, then shut it down."""
+        from rea.web.server import make_server
+
+        server = make_server(host="127.0.0.1", port=0, token="")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            host, port = server.server_address
+            with urllib.request.urlopen(f"http://{host}:{port}/api/health", timeout=30) as response:
+                payload = json.loads(response.read())
+            self.assertEqual(payload["agent"], "ARGUS")
+        finally:
+            server.shutdown()
+            server.server_close()
 
 
 if __name__ == "__main__":
