@@ -1,0 +1,61 @@
+// REA rule pack: ransomware and extortion behaviour.
+// Syntax is YARA-like; see rea/analysis/rules.py for the full grammar.
+
+rule Ransom_Note_Text
+{
+    meta:
+        author      = "rea-team"
+        severity    = "high"
+        score       = 30
+        description = "Classic ransomware note language"
+
+    strings:
+        $a = "your files have been encrypted" nocase
+        $b = "all your files" nocase
+        $c = "recover your files" nocase
+        $d = "decrypt your files" nocase
+        $e = "send bitcoin" nocase
+        $f = "your documents, photos, databases" nocase
+
+    condition:
+        any of ($a*) or any of ($b*) or any of ($c*) or any of ($d*) or any of ($e*) or any of ($f*)
+}
+
+rule Ransomware_Shadow_Copy_Deletion
+{
+    meta:
+        author      = "rea-team"
+        severity    = "critical"
+        score       = 45
+        description = "Deletes volume shadow copies, a ransomware precursor"
+
+    strings:
+        $a = "vssadmin delete shadows" nocase
+        $b = "wbadmin delete catalog" nocase
+        $c = "bcdedit /set" nocase
+        $d = "cipher /w" nocase
+        $e = "WbadminDeleteCatalog"
+
+    condition:
+        2 of them
+}
+
+rule Ransomware_Extension_Pattern
+{
+    meta:
+        author      = "rea-team"
+        severity    = "high"
+        score       = 25
+        description = "Ransomware file-extension markers"
+
+    strings:
+        $a = ".locked" nocase
+        $b = ".encrypted" nocase
+        $c = ".crypt" nocase
+        $d = "README_DECRYPT" nocase
+        $e = "HOW_TO_DECRYPT" nocase
+        $f = "RECOVER_FILES" nocase
+
+    condition:
+        2 of them
+}
