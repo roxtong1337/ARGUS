@@ -8,10 +8,15 @@ version = "0.1.0"
 description = "REA - Reverse Engineering Anything: offline reverse-engineering toolkit with sandboxed detonation, the ARGUS agent, and a pluggable Hermes integration"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 authors = [{ name = "REA Hackathon Team" }]
 keywords = ["reverse-engineering", "malware-analysis", "dfir", "cyber-security", "static-analysis", "sandbox", "detonation"]
 dependencies = []
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
 
 [project.scripts]
 rea = "rea.cli:main"

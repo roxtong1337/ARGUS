@@ -232,3 +232,7 @@ what the isolation does *not* protect against.
 - [docs/HERMES.md](docs/HERMES.md) — the integration contract, with an adapter guide
 - [docs/DETONATION.md](docs/DETONATION.md) — the sandbox design and threat model
 - [docs/ARGUS.md](docs/ARGUS.md) — the agent, its tools and both front-ends
+
+## License
+
+MIT. See [LICENSE](LICENSE).
