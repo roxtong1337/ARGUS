@@ -53,6 +53,11 @@ core: the `rea` CLI, and the **ARGUS** agent (terminal REPL + web console).
   planner is allowed only behind the `Planner` protocol, opt-in.
 - **The web UI must not use `innerHTML`.** Everything it renders can originate
   from a hostile sample. Build DOM nodes and set `textContent`.
+- **Commits belong to the repository owner alone.** The `openhands` identity and
+  a `Co-authored-by: openhands` trailer both surface a second contributor on the
+  repository's contributor list, which the owner does not want. Author and commit
+  as `roxtong1337 <162146170+roxtong1337@users.noreply.github.com>` (already set
+  in the local git config) and do not add co-author trailers.
 
 ## Layout
 
