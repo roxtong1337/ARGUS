@@ -1,0 +1,77 @@
+// REA rule pack: downloaders, droppers and living-off-the-land behaviour.
+
+rule Downloader_Curl_Pipe_Shell
+{
+    meta:
+        author      = "rea-team"
+        severity    = "critical"
+        score       = 40
+        description = "Pipes a remote download straight into a shell"
+
+    strings:
+        $a = "curl -s" nocase
+        $b = "curl -fsSL" nocase
+        $c = "wget -q" nocase
+        $d = "| bash" nocase
+        $e = "| sh" nocase
+        $f = "|sh" nocase
+
+    condition:
+        (any of ($a*) or any of ($b*) or any of ($c*)) and (any of ($d*) or any of ($e*) or any of ($f*))
+}
+
+rule PowerShell_Encoded_Command
+{
+    meta:
+        author      = "rea-team"
+        severity    = "high"
+        score       = 30
+        description = "PowerShell running a base64 encoded command"
+
+    strings:
+        $a = "-EncodedCommand" nocase
+        $b = "-enc " nocase
+        $c = "FromBase64String" nocase
+        $d = "Invoke-Expression" nocase
+        $e = "IEX(" nocase
+
+    condition:
+        2 of them
+}
+
+rule Reverse_Shell_Dev_Tcp
+{
+    meta:
+        author      = "rea-team"
+        severity    = "critical"
+        score       = 45
+        description = "Bash reverse shell over /dev/tcp"
+
+    strings:
+        $a = "/dev/tcp/"
+        $b = "bash -i"
+        $c = "0>&1"
+        $d = ">&1"
+
+    condition:
+        any of them and 2 of them
+}
+
+rule Crypto_Miner_Pool
+{
+    meta:
+        author      = "rea-team"
+        severity    = "high"
+        score       = 30
+        description = "Cryptocurrency mining pool or miner identifiers"
+
+    strings:
+        $a = "stratum+tcp://" nocase
+        $b = "stratum+ssl://" nocase
+        $c = "xmrig" nocase
+        $d = "minerd" nocase
+        $e = "--donate-level" nocase
+
+    condition:
+        any of them
+}

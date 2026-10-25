@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rea"
+version = "0.1.0"
+description = "REA - Reverse Engineering Anything: offline static analysis toolkit for cyber defence, with pluggable Hermes integration"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "REA Hackathon Team" }]
+keywords = ["reverse-engineering", "malware-analysis", "dfir", "cyber-security", "static-analysis"]
+dependencies = []
+
+[project.scripts]
+rea = "rea.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+include = ["rea*"]
+
+[tool.setuptools.package-data]
+rea = ["../rules/*.rea"]
