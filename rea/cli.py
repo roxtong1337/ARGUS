@@ -101,6 +101,38 @@ def _build_parser() -> argparse.ArgumentParser:
     send.add_argument("--dry-run", action="store_true", help="build the payload but do not POST")
     send.add_argument("--quiet", action="store_true")
 
+    # detonate -----------------------------------------------------------
+    detonate = sub.add_parser("detonate", help="run a file in an isolated sandbox and report behaviour")
+    detonate.add_argument("file")
+    detonate.add_argument("--backend", default="docker", choices=["docker", "local"],
+                          help="sandbox backend (docker is the only isolated one)")
+    detonate.add_argument("--timeout", type=int, default=20, help="wall-clock limit in seconds")
+    detonate.add_argument("--memory", type=int, default=256, help="memory limit in MiB")
+    detonate.add_argument("--pids", type=int, default=128, help="process limit")
+    detonate.add_argument("--allow-unsafe", action="store_true",
+                          help="permit the non-isolated local backend (host execution)")
+    detonate.add_argument("--format", default="text", choices=["text", "json", "markdown", "sarif"])
+    detonate.add_argument("-o", "--output", default="-", help="write the report here ('-' for stdout)")
+    detonate.add_argument("--rules", action="append", default=None)
+    detonate.add_argument("--quiet", action="store_true")
+
+    # sandbox ------------------------------------------------------------
+    sub.add_parser("sandbox", help="report whether detonation is available")
+
+    # agent --------------------------------------------------------------
+    agent = sub.add_parser("agent", help="ARGUS analyst agent: terminal or web interface")
+    agent.add_argument("--mode", default="tui", choices=["tui", "web"],
+                       help="tui (terminal) or web (browser)")
+    agent.add_argument("--host", default="127.0.0.1", help="web bind address")
+    agent.add_argument("--port", type=int, default=12000, help="web bind port")
+    agent.add_argument("--token", default=os.environ.get("REA_WEB_TOKEN", ""),
+                       help="shared token required by the web API (or REA_WEB_TOKEN)")
+    agent.add_argument("--no-colour", action="store_true", help="disable ANSI colour in the TUI")
+    agent.add_argument("--exec", dest="agent_commands", action="append", default=[],
+                       metavar="COMMAND",
+                       help="run a command non-interactively (repeatable), then exit")
+    agent.add_argument("--verbose", action="store_true", help="log every HTTP request")
+
     return parser
 
 
@@ -325,6 +357,104 @@ def _exit_code(artifact: Artifact) -> int:
     return {"clean": 0, "low-risk": 0, "suspicious": 2, "malicious": 3}.get(artifact.verdict, 0)
 
 
+def cmd_detonate(args) -> int:
+    """Scan a file statically, then run it in the sandbox and merge the results."""
+    from .analysis.pipeline import Pipeline
+    from .dynamic import Detonator
+    from .report.render import render
+
+    rule_paths = args.rules if args.rules else [DEFAULT_RULE_DIR]
+    artifact = Pipeline(rule_paths=rule_paths).scan_path(args.file)
+
+    detonator = Detonator(
+        backend=args.backend,
+        timeout=args.timeout,
+        memory_mb=args.memory,
+        pids=args.pids,
+        allow_unsafe=args.allow_unsafe,
+    )
+    ready, reason = detonator.check()
+    if not ready:
+        print(f"[rea] detonation unavailable: {reason}", file=sys.stderr)
+        return 1
+
+    if not args.quiet:
+        print(f"[rea] detonating {args.file} in the {args.backend} sandbox "
+              f"(timeout {args.timeout}s)", file=sys.stderr)
+
+    result = detonator.apply(artifact)
+
+    if not result.ok and not result.skipped_reason:
+        print(f"[rea] detonation failed: {result.error}", file=sys.stderr)
+    elif result.skipped_reason and not args.quiet:
+        print(f"[rea] skipped: {result.skipped_reason}", file=sys.stderr)
+
+    if not args.quiet and result.telemetry:
+        print(f"[rea] {len(result.telemetry.events)} syscall event(s), "
+              f"{len(result.findings)} behavioural finding(s)", file=sys.stderr)
+
+    output = render(artifact, args.format)
+    if args.output == "-":
+        print(output)
+    else:
+        with open(args.output, "w", encoding="utf-8") as handle:
+            handle.write(output)
+        if not args.quiet:
+            print(f"[rea] wrote {args.output}", file=sys.stderr)
+
+    return _exit_code(artifact)
+
+
+def cmd_sandbox(_args) -> int:
+    """Report whether detonation is available and what it would use."""
+    from .dynamic import Detonator, list_backends
+
+    print("Sandbox backends")
+    print("-" * 60)
+    for backend in list_backends():
+        mark = "READY " if backend["available"] else "unavail"
+        safety = "isolated" if backend["isolated"] else "NOT ISOLATED"
+        print(f"  [{mark}] {backend['name']:8} ({safety})")
+        print(f"           {backend['description']}")
+
+    detonator = Detonator()
+    ready, reason = detonator.check()
+    print()
+    if ready:
+        print(f"Detonation is ready via the {detonator.backend_name} backend.")
+        return 0
+    print(f"Detonation is NOT ready: {reason}")
+    print()
+    print("To enable it:")
+    print("  docker build -t rea-sandbox:latest sandbox/")
+    return 1
+
+
+def cmd_agent(args) -> int:
+    """Start the ARGUS agent in terminal or web mode."""
+    from .agent.session import AgentSession
+
+    if args.mode == "web":
+        from .web.server import serve
+
+        return serve(host=args.host, port=args.port, token=args.token, verbose=args.verbose)
+
+    from .agent.tui import CYAN, Tui
+
+    session = AgentSession()
+    if args.agent_commands:
+        tui = Tui(session=session, colour=not args.no_colour)
+        tui.banner()
+        for command in args.agent_commands:
+            tui._write(f"\n  {tui.colour('▸', CYAN)} {command}")
+            tui._dispatch(command)
+        return 0
+
+    from .agent.tui import run_tui
+
+    return run_tui(session)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -339,6 +469,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "rules": cmd_rules,
         "integrations": cmd_integrations,
         "send": cmd_send,
+        "detonate": cmd_detonate,
+        "sandbox": cmd_sandbox,
+        "agent": cmd_agent,
     }
     handler = handlers.get(args.command)
     if handler is None:

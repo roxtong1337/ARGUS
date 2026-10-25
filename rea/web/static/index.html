@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARGUS — analyst console</title>
+<style>
+  :root {
+    --bg:        #07090c;
+    --bg-panel:  #0d1117;
+    --bg-raise:  #131a23;
+    --line:      #1e2836;
+    --line-soft: #161d27;
+    --fg:        #d6e2f0;
+    --fg-dim:    #7d8fa6;
+    --fg-faint:  #4a5768;
+    --accent:    #22d3ee;
+    --accent-2:  #a78bfa;
+    --critical:  #ff4d6d;
+    --high:      #ff9f45;
+    --medium:    #ffd93d;
+    --low:       #4dabf7;
+    --clean:     #3ddc84;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--fg);
+    font-family: var(--sans); font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    display: flex; flex-direction: column;
+    background-image:
+      radial-gradient(ellipse 900px 500px at 15% -10%, rgba(34,211,238,.07), transparent 60%),
+      radial-gradient(ellipse 700px 400px at 90% 0%, rgba(167,139,250,.06), transparent 55%);
+    background-attachment: fixed;
+  }
+  header {
+    display: flex; align-items: center; gap: 18px;
+    padding: 14px 22px; border-bottom: 1px solid var(--line);
+    background: rgba(13,17,23,.75); backdrop-filter: blur(12px);
+    position: sticky; top: 0; z-index: 20; flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: baseline; gap: 11px; }
+  .brand h1 {
+    margin: 0; font-size: 21px; font-weight: 700; letter-spacing: .16em;
+    font-family: var(--mono);
+    background: linear-gradient(96deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .brand .tag { color: var(--fg-faint); font-size: 11px; letter-spacing: .05em; }
+  .spacer { flex: 1; }
+  .status {
+    display: flex; align-items: center; gap: 7px;
+    font-family: var(--mono); font-size: 11px; color: var(--fg-dim);
+    padding: 5px 11px; border: 1px solid var(--line); border-radius: 20px;
+    background: var(--bg-panel);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-faint); }
+  .dot.on  { background: var(--clean); box-shadow: 0 0 8px var(--clean); }
+  .dot.off { background: var(--critical); box-shadow: 0 0 8px var(--critical); }
+
+  main {
+    flex: 1; display: grid; grid-template-columns: 290px 1fr;
+    gap: 16px; padding: 16px 22px 26px;
+    max-width: 1560px; width: 100%; margin: 0 auto; align-items: start;
+  }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .panel > h2 {
+    margin: 0; padding: 11px 14px; font-size: 10px; font-weight: 600; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--fg-faint);
+    border-bottom: 1px solid var(--line-soft); font-family: var(--mono);
+  }
+  .panel .body { padding: 13px 14px; }
+
+  .tool { padding: 9px 11px; border-radius: 7px; margin-bottom: 6px; background: var(--bg-raise);
+          border: 1px solid transparent; cursor: pointer; transition: border-color .15s, transform .1s; }
+  .tool:hover { border-color: var(--line); transform: translateX(2px); }
+  .tool .name { font-family: var(--mono); font-size: 12px; color: var(--accent); font-weight: 600; }
+  .tool .desc { color: var(--fg-dim); font-size: 11px; margin-top: 3px; line-height: 1.45; }
+
+  .console { display: flex; flex-direction: column; gap: 16px; }
+  .prompt-row { display: flex; gap: 9px; align-items: stretch; }
+  .prompt-row .caret {
+    font-family: var(--mono); color: var(--accent); font-weight: 700;
+    padding: 12px 0 12px 14px; font-size: 15px; user-select: none;
+  }
+  input[type=text] {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: var(--fg); font-family: var(--mono); font-size: 14px; padding: 13px 4px;
+  }
+  input[type=text]::placeholder { color: var(--fg-faint); }
+  button {
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    padding: 9px 17px; border-radius: 7px; cursor: pointer;
+    background: var(--bg-raise); color: var(--fg); border: 1px solid var(--line);
+    transition: background .15s, border-color .15s;
+  }
+  button:hover { background: #1a2432; border-color: #2a3849; }
+  button.primary {
+    background: linear-gradient(96deg, rgba(34,211,238,.16), rgba(167,139,250,.16));
+    border-color: rgba(34,211,238,.45); color: var(--accent);
+  }
+  button.primary:hover { background: linear-gradient(96deg, rgba(34,211,238,.26), rgba(167,139,250,.26)); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .hint { color: var(--fg-faint); font-size: 11px; font-family: var(--mono); padding: 0 14px 12px; }
+
+  .verdict-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+                  padding: 16px 18px; border-bottom: 1px solid var(--line-soft); }
+  .verdict-badge {
+    font-family: var(--mono); font-size: 15px; font-weight: 700;
+    letter-spacing: .1em; padding: 8px 16px; border-radius: 7px; border: 1px solid currentColor;
+  }
+  .v-malicious  { color: var(--critical); background: rgba(255,77,109,.09); }
+  .v-suspicious { color: var(--medium);   background: rgba(255,217,61,.08); }
+  .v-low-risk   { color: var(--low);      background: rgba(77,171,247,.08); }
+  .v-clean      { color: var(--clean);    background: rgba(61,220,132,.08); }
+  .score-wrap { flex: 1; min-width: 190px; }
+  .score-num { font-family: var(--mono); font-size: 22px; font-weight: 700; }
+  .score-bar { height: 5px; background: var(--bg-raise); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .score-fill { height: 100%; border-radius: 3px; transition: width .5s ease; }
+
+  .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+               gap: 11px; padding: 15px 18px; border-bottom: 1px solid var(--line-soft); }
+  .meta-item .k { font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+                  text-transform: uppercase; color: var(--fg-faint); margin-bottom: 4px; }
+  .meta-item .v { font-family: var(--mono); font-size: 12px; color: var(--fg);
+                  word-break: break-all; line-height: 1.45; }
+  .meta-item .v.dim { color: var(--fg-dim); }
+
+  .finding { padding: 12px 18px; border-bottom: 1px solid var(--line-soft); }
+  .finding:last-child { border-bottom: none; }
+  .finding .top { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
+  .sev { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .09em;
+         text-transform: uppercase; padding: 3px 8px; border-radius: 4px; border: 1px solid currentColor; }
+  .sev-critical { color: var(--critical); background: rgba(255,77,109,.09); }
+  .sev-high     { color: var(--high);     background: rgba(255,159,69,.09); }
+  .sev-medium   { color: var(--medium);   background: rgba(255,217,61,.08); }
+  .sev-low      { color: var(--low);      background: rgba(77,171,247,.08); }
+  .sev-info     { color: var(--fg-dim);   background: rgba(125,143,166,.08); }
+  .finding .title { font-weight: 600; font-size: 13px; }
+  .finding .pts { font-family: var(--mono); font-size: 12px; color: var(--fg-dim); margin-left: auto; }
+  .finding .detail { color: var(--fg-dim); font-size: 12px; margin-top: 7px; line-height: 1.55; }
+  .evidence { margin-top: 9px; display: flex; flex-direction: column; gap: 3px; }
+  .evidence code { font-family: var(--mono); font-size: 11px; color: var(--fg-dim);
+                   background: var(--bg-raise); padding: 4px 8px; border-radius: 4px;
+                   border-left: 2px solid var(--line); word-break: break-all; }
+
+  .ioc-group { padding: 11px 18px; border-bottom: 1px solid var(--line-soft); }
+  .ioc-group:last-child { border-bottom: none; }
+  .ioc-group .label { font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+                      text-transform: uppercase; color: var(--accent); margin-bottom: 7px; }
+  .ioc-group .vals { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ioc-group .vals code { font-family: var(--mono); font-size: 11px; color: var(--fg);
+                          background: var(--bg-raise); padding: 3px 8px; border-radius: 4px; word-break: break-all; }
+
+  .telemetry { padding: 15px 18px; }
+  .telemetry .row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0;
+                    border-bottom: 1px dashed var(--line-soft); font-family: var(--mono); font-size: 12px; }
+  .telemetry .row:last-child { border-bottom: none; }
+  .telemetry .row .k { color: var(--fg-faint); }
+  .telemetry .row .v { color: var(--fg); text-align: right; word-break: break-all; }
+  .pill { font-family: var(--mono); font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid currentColor; }
+  .pill.good { color: var(--clean); }
+  .pill.bad  { color: var(--critical); }
+
+  pre.out { font-family: var(--mono); font-size: 11px; color: var(--fg-dim);
+            background: var(--bg); padding: 11px 13px; border-radius: 6px;
+            border: 1px solid var(--line-soft); overflow-x: auto; margin: 10px 0 0;
+            white-space: pre-wrap; word-break: break-all; }
+
+  .log-line { font-family: var(--mono); font-size: 12px; padding: 6px 18px;
+              border-bottom: 1px solid var(--line-soft); color: var(--fg-dim); }
+  .log-line .tool { color: var(--accent); font-weight: 600; }
+  .log-line .ok   { color: var(--clean); }
+  .log-line .err  { color: var(--critical); }
+
+  .empty { padding: 46px 20px; text-align: center; color: var(--fg-faint); font-size: 13px; line-height: 1.7; }
+  .empty code { font-family: var(--mono); color: var(--accent); background: var(--bg-raise);
+                padding: 2px 7px; border-radius: 4px; font-size: 12px; }
+
+  .dropzone { margin: 0 18px 16px; padding: 22px; border: 1px dashed var(--line);
+              border-radius: 8px; text-align: center; color: var(--fg-faint);
+              font-size: 12px; cursor: pointer; transition: border-color .15s, background .15s; }
+  .dropzone:hover, .dropzone.over { border-color: var(--accent); background: rgba(34,211,238,.04); color: var(--fg-dim); }
+
+  .spinner { width: 13px; height: 13px; border: 2px solid var(--line);
+             border-top-color: var(--accent); border-radius: 50%;
+             animation: spin .7s linear infinite; display: inline-block; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>ARGUS</h1>
+    <span class="tag">Automated Reverse-engineering Guidance and Understanding System</span>
+  </div>
+  <div class="spacer"></div>
+  <div class="status"><span class="dot" id="dot"></span><span id="status-text">connecting</span></div>
+</header>
+
+<main>
+  <aside class="panel">
+    <h2>Capabilities</h2>
+    <div class="body" id="tools"><div class="tool"><div class="desc">loading…</div></div></div>
+  </aside>
+
+  <section class="console">
+    <div class="panel">
+      <h2>Console</h2>
+      <div class="prompt-row">
+        <span class="caret">&gt;</span>
+        <input type="text" id="cmd" autocomplete="off" spellcheck="false"
+               placeholder="scan samples/malicious_sample.sh   ·   full /path/to/sample   ·   help">
+        <button class="primary" id="run">Run</button>
+      </div>
+      <div class="hint" id="hint">Try: <strong>full samples/malicious_sample.sh</strong> — static triage then sandboxed detonation</div>
+      <div class="dropzone" id="drop">Drop a file here, or click to upload for static analysis</div>
+      <input type="file" id="file" style="display:none">
+    </div>
+
+    <div class="panel" id="result-panel">
+      <h2>Result</h2>
+      <div id="result">
+        <div class="empty">
+          Nothing analysed yet.<br>
+          Run <code>scan &lt;path&gt;</code> for static analysis, or <code>full &lt;path&gt;</code> to add sandboxed detonation.
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Activity</h2>
+      <div id="log"><div class="log-line">no tool calls yet</div></div>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+/* Every value rendered here can originate from a hostile sample (file names,
+   strings, IOC values). Build DOM nodes and set textContent, never innerHTML. */
+function el(tag, className, text) {
+  var node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
+}
+
+function sevClass(severity) {
+  var s = String(severity || "info").toLowerCase();
+  return ["critical", "high", "medium", "low", "info"].indexOf(s) >= 0 ? "sev-" + s : "sev-info";
+}
+
+function verdictClass(verdict) {
+  var v = String(verdict || "").toLowerCase();
+  return ["malicious", "suspicious", "low-risk", "clean"].indexOf(v) >= 0 ? "v-" + v : "v-low-risk";
+}
+
+function scoreColour(score) {
+  if (score >= 70) return "var(--critical)";
+  if (score >= 40) return "var(--medium)";
+  if (score >= 15) return "var(--low)";
+  return "var(--clean)";
+}
+
+async function api(path, options) {
+  var response = await fetch(path, Object.assign({ credentials: "same-origin" }, options || {}));
+  var text = await response.text();
+  var payload;
+  try { payload = JSON.parse(text); }
+  catch (e) { throw new Error("server returned non-JSON: " + text.slice(0, 200)); }
+  if (!response.ok) throw new Error(payload.error || ("HTTP " + response.status));
+  return payload;
+}
+
+function renderTools(tools) {
+  var host = document.getElementById("tools");
+  host.replaceChildren();
+  tools.forEach(function (tool) {
+    var card = el("div", "tool");
+    card.appendChild(el("div", "name", tool.name));
+    card.appendChild(el("div", "desc", tool.description));
+    card.addEventListener("click", function () {
+      var input = document.getElementById("cmd");
+      input.value = (tool.examples && tool.examples[0]) || tool.name;
+      input.focus();
+    });
+    host.appendChild(card);
+  });
+}
+
+function renderLog(transcript) {
+  var host = document.getElementById("log");
+  host.replaceChildren();
+  if (!transcript || !transcript.length) {
+    host.appendChild(el("div", "log-line", "no tool calls yet"));
+    return;
+  }
+  transcript.slice().reverse().forEach(function (entry) {
+    var line = el("div", "log-line");
+    line.appendChild(el("span", entry.ok ? "ok" : "err", entry.ok ? "✓ " : "✗ "));
+    line.appendChild(el("span", "tool", entry.tool));
+    var args = Object.keys(entry.arguments || {})
+      .filter(function (k) { var v = entry.arguments[k]; return v !== "" && v !== null && v !== undefined; })
+      .map(function (k) { return k + "=" + entry.arguments[k]; }).join(" ");
+    if (args) line.appendChild(el("span", "", " " + args));
+    line.appendChild(el("span", "", "  —  " + (entry.summary || "")));
+    host.appendChild(line);
+  });
+}
+
+function renderVerdict(artifact) {
+  var summary = artifact.summary || {};
+  var verdict = String(summary.verdict || artifact.verdict || "unknown").toLowerCase();
+  var score = summary.risk_score !== undefined ? summary.risk_score : (artifact.risk_score || 0);
+  var fileType = artifact.file_type || {};
+  var hashes = artifact.hashes || {};
+  var fragment = document.createDocumentFragment();
+
+  var head = el("div", "verdict-head");
+  head.appendChild(el("div", "verdict-badge " + verdictClass(verdict), verdict.toUpperCase()));
+
+  var scoreWrap = el("div", "score-wrap");
+  var scoreLine = el("div", "score-num", score + " / 100");
+  scoreLine.style.color = scoreColour(score);
+  scoreWrap.appendChild(scoreLine);
+  var bar = el("div", "score-bar");
+  var fill = el("div", "score-fill");
+  fill.style.width = Math.max(2, Math.min(100, score)) + "%";
+  fill.style.background = scoreColour(score);
+  bar.appendChild(fill);
+  scoreWrap.appendChild(bar);
+  head.appendChild(scoreWrap);
+
+  var findings = artifact.findings || [];
+  var counts = {};
+  findings.forEach(function (f) { counts[f.severity] = (counts[f.severity] || 0) + 1; });
+  var tally = el("div", "meta-item");
+  tally.appendChild(el("div", "k", "findings"));
+  var tallyValue = Object.keys(counts).sort().map(function (k) { return counts[k] + " " + k; }).join(" · ") || "none";
+  tally.appendChild(el("div", "v", findings.length + " — " + tallyValue));
+  head.appendChild(tally);
+  fragment.appendChild(head);
+
+  var grid = el("div", "meta-grid");
+  function meta(key, value, dim) {
+    var item = el("div", "meta-item");
+    item.appendChild(el("div", "k", key));
+    item.appendChild(el("div", "v" + (dim ? " dim" : ""), value));
+    grid.appendChild(item);
+  }
+  meta("type", fileType.description || fileType.kind || "unknown");
+  meta("size", (artifact.size || 0) + " bytes");
+  if (hashes.sha256) meta("sha256", hashes.sha256, true);
+  if (fileType.arch) meta("arch", fileType.arch + (fileType.bits ? " " + fileType.bits + "-bit" : ""));
+  meta("source", artifact.path || artifact.basename || "—", true);
+  fragment.appendChild(grid);
+
+  var indicators = artifact.indicators || {};
+  Object.keys(indicators).sort().forEach(function (key) {
+    var values = indicators[key] || [];
+    if (!values.length) return;
+    var group = el("div", "ioc-group");
+    group.appendChild(el("div", "label", key + " (" + values.length + ")"));
+    var vals = el("div", "vals");
+    values.slice(0, 40).forEach(function (value) { vals.appendChild(el("code", "", value)); });
+    group.appendChild(vals);
+    fragment.appendChild(group);
+  });
+
+  findings.slice().sort(function (a, b) { return (b.score || 0) - (a.score || 0); })
+    .forEach(function (finding) {
+      var card = el("div", "finding");
+      var top = el("div", "top");
+      top.appendChild(el("span", "sev " + sevClass(finding.severity), finding.severity || "info"));
+      top.appendChild(el("span", "title", finding.title || finding.id || "finding"));
+      top.appendChild(el("span", "pts", "+" + (finding.score || 0)));
+      card.appendChild(top);
+      if (finding.detail) card.appendChild(el("div", "detail", finding.detail));
+      var evidence = finding.evidence || [];
+      if (evidence.length) {
+        var box = el("div", "evidence");
+        evidence.slice(0, 8).forEach(function (item) { box.appendChild(el("code", "", item)); });
+        box.appendChild(el("div", "detail", "source: " + (finding.source || "unknown")));
+        card.appendChild(box);
+      }
+      fragment.appendChild(card);
+    });
+
+  var dynamic = (artifact.stats || {}).dynamic;
+  if (dynamic) {
+    var box = el("div", "telemetry");
+    var header = el("div", "row");
+    header.appendChild(el("span", "k", "sandbox"));
+    var right = el("span", "v");
+    if (dynamic.executed && dynamic.telemetry) {
+      right.appendChild(el("span", "", dynamic.backend + " · " + dynamic.telemetry.event_count + " syscall events "));
+      right.appendChild(el("span", "pill " + (dynamic.isolated ? "good" : "bad"),
+                           dynamic.isolated ? "isolated" : "NOT isolated"));
+    } else {
+      right.appendChild(el("span", "pill bad", "not executed"));
+    }
+    header.appendChild(right);
+    box.appendChild(header);
+
+    var telemetry = dynamic.telemetry;
+    if (telemetry) {
+      var rows = [
+        ["exit code", telemetry.exit_code === null ? "killed" : String(telemetry.exit_code)],
+        ["timed out", telemetry.timed_out ? "yes" : "no"],
+        ["duration", (telemetry.duration_seconds || 0) + "s"]
+      ];
+      if (telemetry.addresses && telemetry.addresses.length)
+        rows.push(["network", telemetry.addresses.join(", ")]);
+      var counts2 = telemetry.syscall_counts || {};
+      var top2 = Object.keys(counts2).slice(0, 8).map(function (k) { return k + "×" + counts2[k]; }).join("  ");
+      if (top2) rows.push(["syscalls", top2]);
+      rows.forEach(function (pair) {
+        var row = el("div", "row");
+        row.appendChild(el("span", "k", pair[0]));
+        row.appendChild(el("span", "v", pair[1]));
+        box.appendChild(row);
+      });
+      if (telemetry.stdout) box.appendChild(el("pre", "out", telemetry.stdout.slice(0, 2000)));
+      (telemetry.notes || []).forEach(function (note) {
+        box.appendChild(el("div", "detail", "· " + note));
+      });
+    } else if (dynamic.error || dynamic.skipped_reason) {
+      box.appendChild(el("div", "detail", dynamic.error || dynamic.skipped_reason));
+    }
+    fragment.appendChild(box);
+  }
+
+  var errors = artifact.errors || [];
+  if (errors.length) {
+    var warn = el("div", "ioc-group");
+    warn.appendChild(el("div", "label", "warnings (" + errors.length + ")"));
+    errors.slice(0, 6).forEach(function (error) { warn.appendChild(el("div", "detail", error)); });
+    fragment.appendChild(warn);
+  }
+
+  return fragment;
+}
+
+function renderResult(state) {
+  var host = document.getElementById("result");
+  host.replaceChildren();
+  if (!state.artifact) {
+    var empty = el("div", "empty", "No artifact in this session yet.");
+    host.appendChild(empty);
+    return;
+  }
+  host.appendChild(renderVerdict(state.artifact));
+}
+
+function applyState(state) {
+  if (!state) return;
+  renderTools(state.tools || []);
+  renderLog(state.transcript || []);
+  renderResult(state);
+}
+
+var busy = false;
+
+function setBusy(value) {
+  busy = value;
+  var button = document.getElementById("run");
+  button.disabled = value;
+  button.replaceChildren(value ? el("span", "spinner") : document.createTextNode("Run"));
+}
+
+async function send(text) {
+  if (!text || busy) return;
+  setBusy(true);
+  try {
+    var payload = await api("/api/command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text })
+    });
+    applyState(payload.state);
+  } catch (error) {
+    document.getElementById("log").prepend(el("div", "log-line", "error: " + error.message));
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function checkHealth() {
+  var dot = document.getElementById("dot");
+  var label = document.getElementById("status-text");
+  try {
+    var payload = await api("/api/health");
+    var sandbox = payload.sandbox || {};
+    dot.className = "dot " + (sandbox.ready ? "on" : "off");
+    label.textContent = sandbox.ready ? payload.agent + " · sandbox ready" : payload.agent + " · static only";
+    label.title = sandbox.ready ? ("backend: " + (sandbox.backend || "?")) : (sandbox.reason || "");
+  } catch (error) {
+    dot.className = "dot off";
+    label.textContent = "offline";
+  }
+}
+
+async function upload(file) {
+  if (busy) return;
+  setBusy(true);
+  try {
+    var payload = await api("/api/upload?name=" + encodeURIComponent(file.name), {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file
+    });
+    applyState(payload.state);
+  } catch (error) {
+    document.getElementById("log").prepend(el("div", "log-line", "upload error: " + error.message));
+  } finally {
+    setBusy(false);
+  }
+}
+
+document.getElementById("run").addEventListener("click", function () {
+  var input = document.getElementById("cmd");
+  send(input.value.trim());
+  input.value = "";
+});
+
+document.getElementById("cmd").addEventListener("keydown", function (event) {
+  if (event.key === "Enter") {
+    send(this.value.trim());
+    this.value = "";
+  }
+});
+
+var dropzone = document.getElementById("drop");
+var fileInput = document.getElementById("file");
+dropzone.addEventListener("click", function () { fileInput.click(); });
+["dragenter", "dragover"].forEach(function (name) {
+  dropzone.addEventListener(name, function (e) { e.preventDefault(); dropzone.classList.add("over"); });
+});
+["dragleave", "drop"].forEach(function (name) {
+  dropzone.addEventListener(name, function (e) {
+    e.preventDefault();
+    dropzone.classList.remove("over");
+  });
+});
+dropzone.addEventListener("drop", function (event) {
+  var file = event.dataTransfer.files[0];
+  if (file) upload(file);
+});
+fileInput.addEventListener("change", function () {
+  if (this.files[0]) upload(this.files[0]);
+});
+
+api("/api/state")
+  .then(function (payload) { applyState(payload.state); })
+  .catch(function () {})
+  .finally(function () { checkHealth(); });
+setInterval(checkHealth, 20000);
+</script>
+</body>
+</html>

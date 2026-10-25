@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rea"
 version = "0.1.0"
-description = "REA - Reverse Engineering Anything: offline static analysis toolkit for cyber defence, with pluggable Hermes integration"
+description = "REA - Reverse Engineering Anything: offline reverse-engineering toolkit with sandboxed detonation, the ARGUS agent, and a pluggable Hermes integration"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "REA Hackathon Team" }]
-keywords = ["reverse-engineering", "malware-analysis", "dfir", "cyber-security", "static-analysis"]
+keywords = ["reverse-engineering", "malware-analysis", "dfir", "cyber-security", "static-analysis", "sandbox", "detonation"]
 dependencies = []
 
 [project.scripts]
